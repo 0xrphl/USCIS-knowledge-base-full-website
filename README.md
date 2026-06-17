@@ -85,21 +85,19 @@ embeddings = pd.read_parquet("hf://datasets/0xrphl/USCIS-knowledge-base-full-web
 ## 🏗️ Architecture
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│  Firecrawl   │────▶│  PostgreSQL   │────▶│   Milvus    │
-│  (Scraping)  │     │  + pgvector   │     │  (Vectors)  │
-└─────────────┘     └──────┬───────┘     └─────────────┘
-                           │
-                     ┌─────▼───────┐
-                     │   Neo4j     │
-                     │  (GraphRAG) │
-                     └─────────────┘
+ 🤗 HuggingFace ──▶ data-loader ──▶ PostgreSQL + pgvector
+                                         │
+                          ┌──────────────┼──────────────┐
+                          ▼              ▼              ▼
+                       Milvus         Neo4j      Embedding Atlas
+                      (Vectors)     (GraphRAG)    (Apple - UMAP)
 ```
 
 | Service | Port | Web UI | Credentials |
 |---|---|---|---|
 | **PostgreSQL** | `5432` | — | `postgres` / `postgres` |
 | **pgAdmin** | `5050` | [localhost:5050](http://127.0.0.1:5050) | `admin@admin.com` / `admin` |
+| **Embedding Atlas** | `8080` | [localhost:8080](http://localhost:8080) | — |
 | **Milvus** | `19530` | — | — |
 | **Attu** (Milvus UI) | `3000` | [localhost:3000](http://localhost:3000) | — |
 | **Neo4j** | `7474` / `7687` | [localhost:7474](http://localhost:7474) | `neo4j` / `neo4jpassword` |
@@ -109,32 +107,44 @@ embeddings = pd.read_parquet("hf://datasets/0xrphl/USCIS-knowledge-base-full-web
 
 ## 🚀 Quick Start
 
-### 1. Start Infrastructure
+### 1. Start Everything (One Command)
 
 ```bash
 git clone https://github.com/0xrphl/USCIS-knowledge-base-full-website.git
 cd USCIS-knowledge-base-full-website
 
 cp .env.example .env
-# Edit .env with your API keys (OpenAI, Firecrawl)
-
 docker compose up -d
 ```
 
-### 2. Ingest Data into Milvus & Neo4j
+This will automatically:
+1. Start PostgreSQL + pgvector
+2. Download dataset from 🤗 HuggingFace (99K chunks + embeddings)
+3. Load data into PostgreSQL
+4. Launch [Embedding Atlas](https://github.com/apple/embedding-atlas) for interactive visualization
+5. Start Milvus, Neo4j, pgAdmin
 
-```bash
-pip install -r scripts/requirements.txt
+### 2. Explore the Embeddings
 
-# Ingest from HuggingFace into local Milvus + Neo4j
-python scripts/ingest.py --milvus --graph
-```
+Open **[localhost:8080](http://localhost:8080)** — [Apple's Embedding Atlas](https://github.com/apple/embedding-atlas) provides:
+- 🏷️ **Automatic clustering & labeling** of 99K USCIS content chunks
+- 🫧 **UMAP dimension reduction** (1536D → 2D) with density contours
+- 🔍 **Real-time search & nearest neighbors**
+- 📊 **Cross-filtering** by immigration category, document type, section
 
 ### 3. Browse the Data
 
-- **pgAdmin**: http://127.0.0.1:5050
-- **Neo4j Browser**: http://localhost:7474
-- **Attu (Milvus)**: http://localhost:3000
+- **Embedding Atlas**: http://localhost:8080 — Interactive embedding visualization
+- **pgAdmin**: http://127.0.0.1:5050 — SQL queries
+- **Neo4j Browser**: http://localhost:7474 — Knowledge graph
+- **Attu (Milvus)**: http://localhost:3000 — Vector search
+
+### 4. Ingest Data into Milvus & Neo4j (Optional)
+
+```bash
+pip install -r scripts/requirements.txt
+python scripts/ingest.py --milvus --graph
+```
 
 ---
 
@@ -164,6 +174,7 @@ python scripts/ingest.py --embed
 
 ### Tools Used
 - **[Firecrawl](https://github.com/firecrawl/firecrawl)** — Web scraping and URL discovery
+- **[Embedding Atlas](https://github.com/apple/embedding-atlas)** — Interactive embedding visualization (Apple)
 - **OpenAI `text-embedding-ada-002`** — 1536-dimensional embeddings
 - **PostgreSQL + pgvector** — Primary storage
 - **Milvus** — Vector similarity search
@@ -175,7 +186,8 @@ python scripts/ingest.py --embed
 
 ```
 .
-├── docker-compose.yml              # PG + pgAdmin + Milvus + Neo4j
+├── docker-compose.yml              # Full stack: PG + Atlas + Milvus + Neo4j
+├── Dockerfile                      # Python container for scripts
 ├── .env.example                    # Environment template
 ├── README.md
 ├── uscis-knowledge-base-banner.svg # Repo banner
@@ -183,7 +195,9 @@ python scripts/ingest.py --embed
 ├── scripts/                        # Python pipeline
 │   ├── config.py                   # Environment config loader
 │   ├── requirements.txt            # Python dependencies
-│   └── ingest.py                   # Full Firecrawl ingestion pipeline
+│   ├── load_from_huggingface.py    # Auto-download HF data → PostgreSQL
+│   ├── run_atlas.py                # Embedding Atlas visualization
+│   └── ingest.py                   # Full Firecrawl scraping pipeline
 │
 └── reports/                        # Data documentation
     ├── DATA_AUDIT.md               # Full data quality report

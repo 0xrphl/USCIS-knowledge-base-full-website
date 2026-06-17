@@ -1,6 +1,5 @@
 services:
   # ─── PostgreSQL + pgvector ───────────────────────────────────────
-  # Use this to run the ingestion pipeline locally or load data from HuggingFace
   postgres:
     image: pgvector/pgvector:pg15
     container_name: supabase_db
@@ -18,6 +17,40 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # ─── Data Loader (downloads from HuggingFace → PostgreSQL) ──────
+  data-loader:
+    build: .
+    container_name: uscis-data-loader
+    command: python scripts/load_from_huggingface.py
+    environment:
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_USER: postgres
+      PG_PASSWORD: postgres
+      PG_DATABASE: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # ─── Embedding Atlas (Apple) — Interactive Visualization ────────
+  embedding-atlas:
+    build: .
+    container_name: uscis-embedding-atlas
+    command: python scripts/run_atlas.py --port 8080
+    ports:
+      - "8080:8080"
+    environment:
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_USER: postgres
+      PG_PASSWORD: postgres
+      PG_DATABASE: postgres
+    depends_on:
+      data-loader:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
   # ─── pgAdmin (SQL UI) ───────────────────────────────────────────
   pgadmin:
@@ -64,7 +97,7 @@ services:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
     ports:
-      - "9001:9001"  # MinIO Console
+      - "9001:9001"
     volumes:
       - minio_data:/minio_data
     command: minio server /minio_data --console-address ":9001"
@@ -82,8 +115,8 @@ services:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
     ports:
-      - "19530:19530"  # Milvus gRPC
-      - "9091:9091"    # Milvus metrics
+      - "19530:19530"
+      - "9091:9091"
     volumes:
       - milvus_data:/var/lib/milvus
     depends_on:
@@ -121,8 +154,8 @@ services:
       NEO4J_dbms_memory_heap_initial__size: 512m
       NEO4J_dbms_memory_heap_max__size: 1G
     ports:
-      - "7474:7474"  # Neo4j Browser (Web UI)
-      - "7687:7687"  # Bolt protocol
+      - "7474:7474"
+      - "7687:7687"
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
