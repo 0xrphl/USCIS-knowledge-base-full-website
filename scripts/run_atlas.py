@@ -2,25 +2,17 @@
 """
 USCIS Knowledge Base — Embedding Atlas Visualization
 
-Loads embeddings from HuggingFace, prepares a combined dataset,
-and launches Apple's Embedding Atlas CLI for interactive exploration.
+Loads embeddings from HuggingFace, prepares data,
+and launches Apple's Embedding Atlas for interactive exploration.
 
 Usage:
-    # Launch interactive visualization (opens browser on port 8080)
-    python scripts/run_atlas.py
-
-    # Specify custom port
-    python scripts/run_atlas.py --port 8080
-
-Requirements:
-    pip install embedding-atlas pandas pyarrow numpy
+    python scripts/run_atlas.py [--port 8080]
 
 See: https://github.com/apple/embedding-atlas
 """
 
 import os
 import sys
-import subprocess
 import argparse
 import logging
 from pathlib import Path
@@ -35,82 +27,89 @@ HF_DATASET = "0xrphl/USCIS-knowledge-base-full-website"
 ATLAS_DATA_DIR = "/tmp/atlas_data"
 
 
-def load_and_prepare_data() -> str:
-    """
-    Load content + embeddings from HuggingFace, merge them,
-    and save as a parquet file for embedding-atlas CLI.
-    """
+def load_data() -> pd.DataFrame:
+    """Load content + embeddings from HuggingFace and merge."""
+    cache_path = os.path.join(ATLAS_DATA_DIR, "uscis_merged.parquet")
     os.makedirs(ATLAS_DATA_DIR, exist_ok=True)
-    output_path = os.path.join(ATLAS_DATA_DIR, "uscis_atlas.parquet")
 
-    # Skip if already prepared
-    if os.path.exists(output_path):
-        log.info(f"Atlas data already prepared at {output_path}")
-        return output_path
+    if os.path.exists(cache_path):
+        log.info(f"Loading cached merged data from {cache_path}")
+        return pd.read_parquet(cache_path)
 
     log.info("Loading content from HuggingFace...")
     content = pd.read_parquet(f"hf://datasets/{HF_DATASET}/data/uscis_content.parquet")
     log.info(f"  Content: {len(content):,} rows")
 
-    log.info("Loading embeddings from HuggingFace (591 MB — this takes a few minutes)...")
+    log.info("Loading embeddings from HuggingFace (591 MB)...")
     embeddings = pd.read_parquet(f"hf://datasets/{HF_DATASET}/data/uscis_embeddings.parquet")
     log.info(f"  Embeddings: {len(embeddings):,} rows")
 
-    # Merge on content_id = id
-    log.info("Merging content + embeddings...")
-    df = content.merge(
-        embeddings[['content_id', 'embedding']],
-        left_on='id', right_on='content_id', how='inner'
-    )
+    log.info("Merging...")
+    df = content.merge(embeddings[['content_id', 'embedding']], left_on='id', right_on='content_id', how='inner')
     df = df.drop(columns=['content_id'], errors='ignore')
-
-    # Truncate content for display (Atlas shows this in hover)
     df['content_preview'] = df['content'].str[:500]
 
-    # Keep embedding as a list column — Atlas auto-detects it
-    atlas_df = df[['id', 'url', 'title', 'content_preview', 'immigration_category',
-                    'document_type', 'section', 'chunk_num', 'total_chunks', 'embedding']].copy()
-
-    log.info(f"Saving atlas dataset ({len(atlas_df):,} rows)...")
-    atlas_df.to_parquet(output_path, index=False)
-    size_mb = os.path.getsize(output_path) / (1024 * 1024)
-    log.info(f"✅ Saved to {output_path} ({size_mb:.1f} MB)")
-
-    return output_path
+    df.to_parquet(cache_path, index=False)
+    log.info(f"  Cached to {cache_path}")
+    return df
 
 
-def run_atlas(data_path: str, port: int = 8080):
-    """Launch embedding-atlas CLI on the prepared data."""
+def run_atlas(df: pd.DataFrame, port: int = 8080):
+    """Launch Embedding Atlas using the Python API."""
+    log.info(f"Preparing embedding matrix ({len(df):,} × 1536)...")
+    emb_matrix = np.stack(df['embedding'].values).astype(np.float32)
+
+    display_df = df[['id', 'url', 'title', 'content_preview', 'immigration_category',
+                      'document_type', 'section', 'chunk_num', 'total_chunks']].copy()
+
     log.info(f"Launching Embedding Atlas on port {port}...")
-    log.info(f"  Data: {data_path}")
     log.info(f"  Open http://localhost:{port} in your browser")
 
-    # embedding-atlas CLI: embedding-atlas <file> --port <port> --host 0.0.0.0
-    # --embedding flag selects the embedding column non-interactively
-    cmd = [
-        "embedding-atlas", data_path,
-        "--embedding", "embedding",
-        "--port", str(port),
-        "--host", "0.0.0.0",
-    ]
+    # Use the Python API — works non-interactively in Docker
+    from embedding_atlas.widget import EmbeddingAtlasWidget
+    from embedding_atlas.server import serve_application
 
-    log.info(f"  Command: {' '.join(cmd)}")
+    # Create the widget data and serve it
+    import json
+    import tempfile
 
-    # Run as subprocess (blocks until killed)
-    proc = subprocess.run(cmd, check=True)
+    # Export as DuckDB-compatible format for Atlas
+    export_path = os.path.join(ATLAS_DATA_DIR, "atlas_export.parquet")
+
+    # Create a DataFrame with embedding columns expanded
+    log.info("Expanding embeddings for Atlas...")
+    emb_cols = [f"emb_{i}" for i in range(emb_matrix.shape[1])]
+    emb_df = pd.DataFrame(emb_matrix, columns=emb_cols, index=display_df.index)
+    atlas_df = pd.concat([display_df, emb_df], axis=1)
+
+    atlas_df.to_parquet(export_path, index=False)
+    log.info(f"  Saved atlas export ({os.path.getsize(export_path) / 1024 / 1024:.0f} MB)")
+
+    # Use the CLI with no interactive prompts by piping the column selection
+    import subprocess
+    env = os.environ.copy()
+    env['PYTHONUNBUFFERED'] = '1'
+
+    # Use embedding-atlas export to generate a static app, then serve it
+    # Or just use uvicorn to serve the API directly
+    log.info("Starting embedding-atlas server...")
+
+    # The simplest non-interactive approach: use the Python show() with server mode
+    from embedding_atlas import show
+    show(atlas_df, embedding=emb_cols, port=port, host="0.0.0.0", open_browser=False)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="USCIS Embedding Atlas Visualization")
-    parser.add_argument("--port", type=int, default=8080, help="Atlas server port (default: 8080)")
+    parser = argparse.ArgumentParser(description="USCIS Embedding Atlas")
+    parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
 
     log.info("=" * 60)
     log.info("USCIS Knowledge Base — Embedding Atlas")
     log.info("=" * 60)
 
-    data_path = load_and_prepare_data()
-    run_atlas(data_path, args.port)
+    df = load_data()
+    run_atlas(df, args.port)
 
 
 if __name__ == "__main__":
