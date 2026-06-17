@@ -41,6 +41,47 @@ This dataset was built by scraping the entire [USCIS website](https://www.uscis.
 
 ---
 
+## 📦 Get the Dataset
+
+The full dataset (content + embeddings) is hosted on 🤗 HuggingFace:
+
+📦 **[huggingface.co/datasets/0xrphl/USCIS-knowledge-base-full-website](https://huggingface.co/datasets/0xrphl/USCIS-knowledge-base-full-website)**
+
+### Load with 🤗 Datasets
+
+```python
+from datasets import load_dataset
+
+# Load content chunks (99,489 rows)
+content = load_dataset("0xrphl/USCIS-knowledge-base-full-website", "content", split="train")
+print(content[0])
+
+# Load embeddings (99,488 rows × 1536-dim float32 vectors)
+embeddings = load_dataset("0xrphl/USCIS-knowledge-base-full-website", "embeddings", split="train")
+print(len(embeddings[0]["embedding"]))  # 1536
+```
+
+### Load with Pandas
+
+```python
+import pandas as pd
+
+content = pd.read_parquet("hf://datasets/0xrphl/USCIS-knowledge-base-full-website/data/uscis_content.parquet")
+embeddings = pd.read_parquet("hf://datasets/0xrphl/USCIS-knowledge-base-full-website/data/uscis_embeddings.parquet")
+```
+
+### Available Files on HuggingFace
+
+| File | Rows | Size | Description |
+|---|---|---|---|
+| `uscis_content.parquet` | 99,489 | 47 MB | Content chunks with metadata |
+| `uscis_embeddings.parquet` | 99,488 | 591 MB | OpenAI embedding vectors |
+| `processed_urls.parquet` | 4,666 | 0.2 MB | All scraped URLs |
+| `scraping_metadata.parquet` | 28 | <1 KB | Scraping session logs |
+| `assessments.parquet` | 5 | <1 KB | Immigration assessments |
+
+---
+
 ## 🏗️ Architecture
 
 ```
@@ -71,60 +112,62 @@ This dataset was built by scraping the entire [USCIS website](https://www.uscis.
 ### 1. Start Infrastructure
 
 ```bash
-# Clone the repo
-git clone https://github.com/0xrphl/USCIS-knowledge-base-full-website.git && cd USCIS-knowledge-base-full-website
+git clone https://github.com/0xrphl/USCIS-knowledge-base-full-website.git
+cd USCIS-knowledge-base-full-website
 
-# Copy environment config
 cp .env.example .env
+# Edit .env with your API keys (OpenAI, Firecrawl)
 
-# Start all services (first run restores the DB backup — takes ~5 min)
 docker compose up -d
-
-# Watch the restore progress
-docker logs -f supabase_db
 ```
 
-Wait until you see `=== Restore complete ===`, then all services are ready.
-
-### 2. Browse the Data
-
-- **pgAdmin**: http://127.0.0.1:5050 → Expand "Supabase Local" → Schemas → public → Tables
-- **Neo4j Browser**: http://localhost:7474 (after running the graph ingestion)
-- **Attu (Milvus)**: http://localhost:3000 (after running Milvus ingestion)
-
-### 3. Ingest into Milvus & Neo4j
+### 2. Ingest Data into Milvus & Neo4j
 
 ```bash
-# Install Python dependencies
 pip install -r scripts/requirements.txt
 
-# Edit .env with your API keys (OpenAI, Firecrawl)
-# Then ingest from the existing DB snapshot:
+# Ingest from HuggingFace into local Milvus + Neo4j
 python scripts/ingest.py --milvus --graph
 ```
 
-### 4. Load from HuggingFace (Alternative)
+### 3. Browse the Data
 
-Don't want to restore the backup? Load the data directly from 🤗 HuggingFace:
+- **pgAdmin**: http://127.0.0.1:5050
+- **Neo4j Browser**: http://localhost:7474
+- **Attu (Milvus)**: http://localhost:3000
 
-```python
-from datasets import load_dataset
+---
 
-# Load content chunks
-content = load_dataset("0xrphl/USCIS-knowledge-base-full-website", "content", split="train")
+## 🔧 Ingestion Pipeline
 
-# Load embeddings (1536-dim OpenAI vectors)
-embeddings = load_dataset("0xrphl/USCIS-knowledge-base-full-website", "embeddings", split="train")
-```
+The `scripts/ingest.py` script is the full scraping and ingestion pipeline built with [Firecrawl](https://github.com/firecrawl/firecrawl). It supports 7 stages:
 
-📦 **Dataset:** [huggingface.co/datasets/0xrphl/USCIS-knowledge-base-full-website](https://huggingface.co/datasets/0xrphl/USCIS-knowledge-base-full-website)
-
-### 5. Export CSVs / Parquet
+| Stage | Command | Description |
+|---|---|---|
+| 1. Discover | `--discover` | Find URLs via [Firecrawl](https://github.com/firecrawl/firecrawl) map + SEO sitemaps |
+| 2. Scrape | `--scrape` | Crawl pages with [Firecrawl](https://github.com/firecrawl/firecrawl) (markdown + HTML) |
+| 3+4. Classify & Chunk | `--chunk` | Categorize content + split into ~1,500 char chunks |
+| 5. Embed | `--embed` | Generate OpenAI text-embedding-ada-002 vectors |
+| 6. Milvus | `--milvus` | Ingest vectors into Milvus for similarity search |
+| 7. Graph | `--graph` | Build Neo4j knowledge graph for GraphRAG |
 
 ```bash
-python scripts/export_csv.py --output-dir exports/
-python scripts/export_parquet.py --output-dir huggingface/data/
+# Full pipeline (fresh scrape — requires Firecrawl + OpenAI API keys)
+python scripts/ingest.py --all
+
+# Re-ingest from HuggingFace data into Milvus/Neo4j (no API keys needed)
+python scripts/ingest.py --milvus --graph
+
+# Generate missing embeddings only
+python scripts/ingest.py --embed
 ```
+
+### Tools Used
+- **[Firecrawl](https://github.com/firecrawl/firecrawl)** — Web scraping and URL discovery
+- **OpenAI `text-embedding-ada-002`** — 1536-dimensional embeddings
+- **PostgreSQL + pgvector** — Primary storage
+- **Milvus** — Vector similarity search
+- **Neo4j** — Knowledge graph for GraphRAG
 
 ---
 
@@ -132,60 +175,21 @@ python scripts/export_parquet.py --output-dir huggingface/data/
 
 ```
 .
-├── docker-compose.yml                          # PG + pgAdmin + Milvus + Neo4j
-├── .env.example                                # Environment template
-├── .gitignore
+├── docker-compose.yml              # PG + pgAdmin + Milvus + Neo4j
+├── .env.example                    # Environment template
 ├── README.md
-├── db_cluster-26-07-2025@08-08-01.backup       # Supabase pg_dumpall (~3 GB)
-├── pgadmin-servers.json                        # Pre-configured pgAdmin server
+├── uscis-knowledge-base-banner.svg # Repo banner
 │
-├── init/                                       # DB initialization
-│   ├── 01-extensions.sql                       # pgvector, uuid-ossp, pgcrypto
-│   └── 02-restore.sh                          # Auto-restore on first startup
+├── scripts/                        # Python pipeline
+│   ├── config.py                   # Environment config loader
+│   ├── requirements.txt            # Python dependencies
+│   └── ingest.py                   # Full Firecrawl ingestion pipeline
 │
-├── scripts/                                    # Python pipeline
-│   ├── config.py                               # Environment config loader
-│   ├── requirements.txt                        # Python dependencies
-│   ├── export_csv.py                           # Export tables to CSV
-│   └── ingest.py                               # Full ingestion pipeline (v2)
-│
-└── reports/                                    # Data documentation
-    ├── DATA_AUDIT.md                           # Full data quality report
-    ├── INGESTION_ERRORS.md                     # Error analysis
-    └── SCHEMA.md                               # Database schema docs
+└── reports/                        # Data documentation
+    ├── DATA_AUDIT.md               # Full data quality report
+    ├── INGESTION_ERRORS.md         # Error analysis
+    └── SCHEMA.md                   # Database schema docs
 ```
-
----
-
-## 🔧 Ingestion Pipeline (v2)
-
-The `scripts/ingest.py` script is a **reverse-engineered** recreation of the original pipeline. It supports 7 stages:
-
-| Stage | Command | Description |
-|---|---|---|
-| 1. Discover | `--discover` | Find URLs via Firecrawl map + SEO sitemaps |
-| 2. Scrape | `--scrape` | Crawl pages with Firecrawl (markdown + HTML) |
-| 3+4. Classify & Chunk | `--chunk` | Categorize content + split into ~1,500 char chunks |
-| 5. Embed | `--embed` | Generate OpenAI text-embedding-ada-002 vectors |
-| 6. Milvus | `--milvus` | Ingest vectors into Milvus for similarity search |
-| 7. Graph | `--graph` | Build Neo4j knowledge graph for GraphRAG |
-
-```bash
-# Full pipeline (fresh scrape — requires API keys)
-python scripts/ingest.py --all
-
-# Re-ingest from existing snapshot (no API keys needed for Milvus/Neo4j)
-python scripts/ingest.py --milvus --graph
-
-# Generate missing embeddings only
-python scripts/ingest.py --embed
-```
-
-### Original Tools Used
-- **[Firecrawl](https://github.com/firecrawl/firecrawl)** — Web scraping and URL discovery
-- **OpenAI `text-embedding-ada-002`** — 1536-dimensional embeddings
-- **Supabase (PostgreSQL + pgvector)** — Primary storage
-- **SEO sitemap parsing** — URL seed discovery
 
 ---
 
@@ -205,17 +209,14 @@ See [reports/DATA_AUDIT.md](reports/DATA_AUDIT.md) for the full report.
 
 ## 🗺️ Roadmap
 
-- [x] Scrape 4,666 USCIS pages with Firecrawl
+- [x] Scrape 4,666 USCIS pages with [Firecrawl](https://github.com/firecrawl/firecrawl)
 - [x] Chunk content (~1,500 chars, 99,489 chunks)
 - [x] Generate OpenAI embeddings (99,488/99,489)
-- [x] Store in PostgreSQL + pgvector
-- [x] Docker Compose setup with auto-restore
+- [x] Upload dataset to [HuggingFace](https://huggingface.co/datasets/0xrphl/USCIS-knowledge-base-full-website)
 - [x] Data audit and quality reports
-- [x] CSV export script
-- [x] Reverse-engineer ingestion pipeline (v2)
-- [ ] Milvus vector ingestion
+- [x] Firecrawl ingestion pipeline
+- [ ] Milvus vector ingestion from HuggingFace
 - [ ] Neo4j GraphRAG knowledge graph
-- [ ] HuggingFace dataset upload
 - [ ] Semantic search API
 - [ ] RAG chatbot demo
 - [ ] Incremental re-scraping (delta updates)
@@ -223,19 +224,8 @@ See [reports/DATA_AUDIT.md](reports/DATA_AUDIT.md) for the full report.
 
 ---
 
-## 📋 Credentials Summary
-
-| Service | User/Email | Password | URL |
-|---|---|---|---|
-| **PostgreSQL** | `postgres` | `postgres` | `localhost:5432` |
-| **pgAdmin** | `admin@admin.com` | `admin` | http://127.0.0.1:5050 |
-| **Neo4j** | `neo4j` | `neo4jpassword` | http://localhost:7474 |
-| **MinIO** | `minioadmin` | `minioadmin` | http://localhost:9001 |
-| **Milvus/Attu** | — | — | http://localhost:3000 |
-
----
-
 ## 📄 License
 
 Data sourced from [USCIS.gov](https://www.uscis.gov) (U.S. government public domain).  
+Scraped with [Firecrawl](https://github.com/firecrawl/firecrawl).  
 Code is MIT licensed.

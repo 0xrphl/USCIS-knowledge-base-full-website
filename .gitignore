@@ -1,10 +1,6 @@
 # Environment
 .env
 
-# Exports (too large for git — use HuggingFace datasets)
-exports/*.csv
-exports/*.parquet
-
 # Python
 __pycache__/
 *.pyc
@@ -22,12 +18,13 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Docker volumes (local only)
+# Docker volumes
 pgdata/
 neo4j_data/
 
-# HuggingFace local files (parquet data uploaded to HF, not GitHub)
+# HuggingFace local files (data hosted on HuggingFace, not GitHub)
 huggingface/
+exports/
 
-# Backup file (too large for GitHub — use Git LFS or HuggingFace)
+# Backup files (too large for GitHub)
 *.backup
