@@ -99,7 +99,6 @@ def run_atlas(data_path: str, port: int = 8080):
         "embedding-atlas", data_path,
         "--port", str(port),
         "--host", "0.0.0.0",
-        "--embedding-column-prefix", "embedding_",
     ]
 
     log.info(f"  Command: {' '.join(cmd)}")
