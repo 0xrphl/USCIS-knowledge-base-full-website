@@ -65,38 +65,9 @@ def run_atlas(df: pd.DataFrame, port: int = 8080):
     log.info(f"Launching Embedding Atlas on port {port}...")
     log.info(f"  Open http://localhost:{port} in your browser")
 
-    # Use the Python API — works non-interactively in Docker
-    from embedding_atlas.widget import EmbeddingAtlasWidget
-    from embedding_atlas.server import serve_application
-
-    # Create the widget data and serve it
-    import json
-    import tempfile
-
-    # Export as DuckDB-compatible format for Atlas
-    export_path = os.path.join(ATLAS_DATA_DIR, "atlas_export.parquet")
-
-    # Create a DataFrame with embedding columns expanded
-    log.info("Expanding embeddings for Atlas...")
-    emb_cols = [f"emb_{i}" for i in range(emb_matrix.shape[1])]
-    emb_df = pd.DataFrame(emb_matrix, columns=emb_cols, index=display_df.index)
-    atlas_df = pd.concat([display_df, emb_df], axis=1)
-
-    atlas_df.to_parquet(export_path, index=False)
-    log.info(f"  Saved atlas export ({os.path.getsize(export_path) / 1024 / 1024:.0f} MB)")
-
-    # Use the CLI with no interactive prompts by piping the column selection
-    import subprocess
-    env = os.environ.copy()
-    env['PYTHONUNBUFFERED'] = '1'
-
-    # Use embedding-atlas export to generate a static app, then serve it
-    # Or just use uvicorn to serve the API directly
-    log.info("Starting embedding-atlas server...")
-
-    # The simplest non-interactive approach: use the Python show() with server mode
+    # Use embedding_atlas.show() — the Python API for headless/server mode
     from embedding_atlas import show
-    show(atlas_df, embedding=emb_cols, port=port, host="0.0.0.0", open_browser=False)
+    show(display_df, embedding=emb_matrix, port=port, host="0.0.0.0", open_browser=False)
 
 
 def main():
