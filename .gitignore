@@ -1,0 +1,33 @@
+# Environment
+.env
+
+# Exports (too large for git — use HuggingFace datasets)
+exports/*.csv
+exports/*.parquet
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes (local only)
+pgdata/
+neo4j_data/
+
+# HuggingFace local files (parquet data uploaded to HF, not GitHub)
+huggingface/
+
+# Backup file (too large for GitHub — use Git LFS or HuggingFace)
+*.backup
