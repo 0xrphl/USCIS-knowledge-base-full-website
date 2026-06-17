@@ -67,18 +67,9 @@ def load_and_prepare_data() -> str:
     # Truncate content for display (Atlas shows this in hover)
     df['content_preview'] = df['content'].str[:500]
 
-    # Extract embedding dimensions into separate columns (embedding_0, embedding_1, ...)
-    log.info("Expanding embedding vectors into columns...")
-    emb_matrix = np.stack(df['embedding'].values)
-    emb_cols = [f"embedding_{i}" for i in range(emb_matrix.shape[1])]
-    emb_df = pd.DataFrame(emb_matrix, columns=emb_cols, index=df.index)
-
-    # Build final DataFrame for Atlas
-    atlas_df = pd.concat([
-        df[['id', 'url', 'title', 'content_preview', 'immigration_category',
-            'document_type', 'section', 'chunk_num', 'total_chunks']],
-        emb_df
-    ], axis=1)
+    # Keep embedding as a list column — Atlas auto-detects it
+    atlas_df = df[['id', 'url', 'title', 'content_preview', 'immigration_category',
+                    'document_type', 'section', 'chunk_num', 'total_chunks', 'embedding']].copy()
 
     log.info(f"Saving atlas dataset ({len(atlas_df):,} rows)...")
     atlas_df.to_parquet(output_path, index=False)
@@ -95,8 +86,10 @@ def run_atlas(data_path: str, port: int = 8080):
     log.info(f"  Open http://localhost:{port} in your browser")
 
     # embedding-atlas CLI: embedding-atlas <file> --port <port> --host 0.0.0.0
+    # --embedding flag selects the embedding column non-interactively
     cmd = [
         "embedding-atlas", data_path,
+        "--embedding", "embedding",
         "--port", str(port),
         "--host", "0.0.0.0",
     ]
