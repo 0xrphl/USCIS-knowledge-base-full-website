@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="images/uscis-knowledge-base-banner.svg" alt="USCIS Knowledge Base Banner" width="100%"/>
+  <img src="images/USCIS-REPO-COVER.png" alt="USCIS Knowledge Base" width="100%"/>
 </p>
-
-# 🇺🇸 USCIS Knowledge Base
 
 A comprehensive knowledge base of **99,489 content chunks** from **4,666 USCIS pages** with **OpenAI embeddings** (1536-dim), ready for RAG (Retrieval-Augmented Generation), semantic search, and GraphRAG applications.
 
